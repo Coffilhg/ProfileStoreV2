@@ -405,17 +405,30 @@ local function DeepCopyTable(t)
 	return copy
 end
 
-local function ReconcileTable(target, template)
+local function CallDeepCopyFromProfileStore(profileStore, t)
+	local deep_copy_table = profileStore.custom_callbacks[`DeepCopyTable`]
+	if type(deep_copy_table) == "function" then
+		return deep_copy_table(t)
+	end
+
+	return DeepCopyTable(t)
+end
+local function CallDeepCopyFromProfile(profile, t)
+	local profileStore = profile.ProfileStore
+	return CallDeepCopyFromProfileStore(profileStore, t)
+end
+
+local function ReconcileTable(target, template, profile)
 	for k, v in pairs(template) do
 		if type(k) == "string" then -- Only string keys will be reconciled
 			if target[k] == nil then
 				if type(v) == "table" then
-					target[k] = DeepCopyTable(v)
+					target[k] = CallDeepCopyFromProfile(profile, v)
 				else
 					target[k] = v
 				end
 			elseif type(target[k]) == "table" and type(v) == "table" then
-				ReconcileTable(target[k], v)
+				ReconcileTable(target[k], v, profile)
 			end
 		end
 	end
@@ -456,7 +469,7 @@ local function NewMockDataStoreKeyInfo(params)
 
 end
 
-local function MockUpdateAsync(mock_data_store, profile_store_name, key, transform_function, is_get_call) --> loaded_data, key_info
+local function MockUpdateAsync(mock_data_store, profile_store_name, key, transform_function, is_get_call, deep_copy_table) --> loaded_data, key_info
 
 	local profile_store = mock_data_store[profile_store_name]
 
@@ -492,14 +505,14 @@ local function MockUpdateAsync(mock_data_store, profile_store_name, key, transfo
 		return nil
 	else
 		if mock_entry ~= nil and is_get_call ~= true then
-			mock_entry.Data = DeepCopyTable(transform)
+			mock_entry.Data = deep_copy_table(transform)
 			mock_entry.UserIds = DeepCopyTable(user_ids or {})
 			mock_entry.MetaData = DeepCopyTable(roblox_meta_data or {})
 			mock_entry.VersionId += 1
 			mock_entry.UpdatedTime = epoch_time
 		end
 
-		return DeepCopyTable(transform), mock_entry ~= nil and NewMockDataStoreKeyInfo(mock_entry) or nil
+		return deep_copy_table(transform), mock_entry ~= nil and NewMockDataStoreKeyInfo(mock_entry) or nil
 	end
 
 end
@@ -536,6 +549,12 @@ local function UpdateAsync(profile_store, profile_key, transform_params, is_user
 			else
 
 				if type(latest_data.Data) == "table" and type(latest_data.MetaData) == "table" and type(latest_data.GlobalUpdates) == "table" then
+
+					-- Decode scenario 2
+					local decode = profile_store.custom_callbacks[`Decode`]
+					if type(decode) == "function" then
+						latest_data.Data = decode(latest_data.Data)
+					end
 
 					-- Regular profile structure detected:
 
@@ -585,17 +604,22 @@ local function UpdateAsync(profile_store, profile_key, transform_params, is_user
 				latest_data.WasOverwritten = true -- Temporary tag that will be removed on first save
 			end
 
+			local encode = profile_store.custom_callbacks[`Encode`]
+			if type(encode) == "function" then
+				latest_data.Data = encode(latest_data.Data)
+			end
+
 			return latest_data, latest_data.UserIds, latest_data.RobloxMetaData
 		end
 
 		if is_user_mock == true then -- Used when the profile is accessed through ProfileStore.Mock
 
-			loaded_data, key_info = MockUpdateAsync(UserMockStore, profile_store.Name, profile_key, transform_function, is_get_call)
+			loaded_data, key_info = MockUpdateAsync(UserMockStore, profile_store.Name, profile_key, transform_function, is_get_call, CallDeepCopyFromProfileStore(profile_store))
 			task.wait() -- Simulate API call yield
 
 		elseif DataStoreState ~= "Access" then -- Used when API access is disabled
 
-			loaded_data, key_info = MockUpdateAsync(MockStore, profile_store.Name, profile_key, transform_function, is_get_call)
+			loaded_data, key_info = MockUpdateAsync(MockStore, profile_store.Name, profile_key, transform_function, is_get_call, CallDeepCopyFromProfileStore(profile_store))
 			task.wait() -- Simulate API call yield
 
 		else
@@ -895,7 +919,7 @@ local function SaveProfileAsync(profile, is_ending_session, is_overwriting, last
 								locked_updates[index] = true
 							end
 							
-							local send_update_data = DeepCopyTable(update_data)
+							local send_update_data = CallDeepCopyFromProfile(profile, update_data)
 
 							task.spawn(handler, send_update_data, processed_callback)
 
@@ -1033,6 +1057,11 @@ Profile.__index = Profile
 function Profile.New(raw_data, key_info, profile_store, key, is_mock, session_token)
 
 	local data = raw_data.Data or {}
+	-- Decode scenario 1
+	local decode = profile_store.custom_callbacks[`Decode`]
+	if type(decode) == "function" then
+		data = decode(data)
+	end
 	local session = raw_data.MetaData and raw_data.MetaData.ActiveSession or nil
 
 	local global_updates = raw_data.GlobalUpdates and raw_data.GlobalUpdates[2] or {}
@@ -1045,7 +1074,7 @@ function Profile.New(raw_data, key_info, profile_store, key, is_mock, session_to
 	local self = {
 
 		Data = data,
-		LastSavedData = DeepCopyTable(data),
+		LastSavedData = CallDeepCopyFromProfileStore(profile_store, data),
 
 		FirstSessionTime = raw_data.MetaData and raw_data.MetaData.ProfileCreateTime or 0,
 		SessionLoadCount = raw_data.MetaData and raw_data.MetaData.SessionLoadCount or 0,
@@ -1084,7 +1113,12 @@ function Profile:IsActive()
 end
 
 function Profile:Reconcile()
-	ReconcileTable(self.Data, self.ProfileStore.template)
+	local CustomReconcileTable = self.ProfileStore.custom_callbacks[`ReconcileTable`]
+	if type(CustomReconcileTable) == "function" then
+		CustomReconcileTable(self.Data, self.ProfileStore.template)
+		return
+	end
+	ReconcileTable(self.Data, self.ProfileStore.template, self)
 end
 
 function Profile:EndSession()
@@ -1299,6 +1333,13 @@ function ProfileStore.New(store_name, template)
 		mock_load_jobs = {},
 		is_ready = true,
 
+		custom_callbacks = {
+			DeepCopyTable = nil,
+			ReconcileTable = nil,
+			Decode = nil,
+			Encode = nil,
+		},
+
 	}
 	setmetatable(self, ProfileStore)
 
@@ -1494,7 +1535,7 @@ function ProfileStore:StartSessionAsync(profile_key, params)
 						
 						local is_cancel = ProfileStore.IsClosing == true or cancel_condition() == true
 
-						latest_data.Data = DeepCopyTable(self.template)
+						latest_data.Data = CallDeepCopyFromProfileStore(self, self.template)
 						latest_data.MetaData = {
 							ProfileCreateTime = os.time(),
 							SessionLoadCount = 0,
@@ -1763,7 +1804,7 @@ function ProfileStore:GetAsync(profile_key, version)
 				ExistingProfileHandle = nil,
 				MissingProfileHandle = function(latest_data)
 
-					latest_data.Data = DeepCopyTable(self.template)
+					latest_data.Data = CallDeepCopyFromProfileStore(self, self.template)
 					latest_data.MetaData = {
 						ProfileCreateTime = os.time(),
 						SessionLoadCount = 0,
@@ -1864,6 +1905,44 @@ function ProfileStore:RemoveAsync(profile_key)
 
 	return wipe_status
 
+end
+
+-- The <strong>callback</strong> will be called in many cases with a table Profile.Data (from the Datastore), must return a copy of that table (usually modified copying)
+function ProfileStore:SetDeepCopyTableCallback(callback : (Profile.Data) -> ())
+	if type(callback) ~= "function" then
+		error(`Provided callback is not a function!`)
+		return
+	end
+	self.custom_callbacks.DeepCopyTable = callback
+end
+
+-- The <strong>callback</strong> will be called at Profile:Reconcile() with ( target: Profile.Data (Decoded), template: ProfileStore.Template | Profile.ProfileStore.Template )
+function ProfileStore:SetReconcileTableCallback(callback : () -> ())
+	if type(callback) ~= "function" then
+		error(`Provided callback is not a function!`)
+		return
+	end
+	self.custom_callbacks.ReconcileTable = callback
+end
+
+-- The <strong>callback</strong> will be called at the start of transform_function with Profile.Data (from the Datastore), if there was any saved and it will also be called at the start of Profile.New(), before being converted by a DeepCopyTable, this is required for a consistent data structure.
+-- Decode(Profile.Data : JSONAcceptable | whatever was in datastore cloud) -> your own implementation
+function ProfileStore:SetDecodeCallback(callback : (Profile.Data) -> ())
+	if type(callback) ~= "function" then
+		error(`Provided callback is not a function!`)
+		return
+	end
+	self.custom_callbacks.Decode = callback
+end
+
+-- The <strong>callback</strong> will be called at the end of transform_function with Profile.Data (after it has been Decoded by the custom Decode callback set using SetDecodeCallback method), before it's returned back into DataStore
+-- Encode(Profile.Data : your own implementation) -> JSONAcceptable | whatever was in datastore cloud
+function ProfileStore:SetEncodeCallback(callback : (Profile.Data) -> ())
+	if type(callback) ~= "function" then
+		error(`Provided callback is not a function!`)
+		return
+	end
+	self.custom_callbacks.Encode = callback
 end
 
 local ProfileVersionQuery = {}
