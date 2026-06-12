@@ -606,7 +606,10 @@ local function UpdateAsync(profile_store, profile_key, transform_params, is_user
 
 			local encode = profile_store.custom_callbacks[`Encode`]
 			if type(encode) == "function" then
-				latest_data.Data = encode(latest_data.Data)
+				-- Use DeepCopy to convert from State A to State C before Encoding
+				local stateCData = CallDeepCopyFromProfileStore(profile_store, latest_data.Data)
+
+				latest_data.Data = encode(stateCData)
 			end
 
 			return latest_data, latest_data.UserIds, latest_data.RobloxMetaData

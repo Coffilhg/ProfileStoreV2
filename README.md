@@ -20,7 +20,7 @@ This fork makes it easy to implement your own modifications to the data flow.
 > >
 > > > “The data (key value) is also stored as a string, regardless of its initial type. You can check the size of the data with the `JSONEncode()` function, which converts Luau data into a serialized JSON table.”
 > 
-> So as a type it would be defined like this: (**[ProfileStore.luau line 994](<ProfileStore.luau#994>)**)
+> So as a type it would be defined like this: (**[ProfileStore.luau line 994](<ProfileStore.luau/#L994>)**)
 > 
 > ```lua
 > type JSONAcceptable = { JSONAcceptable } | { [string]: JSONAcceptable } | number | string | boolean | buffer
@@ -39,14 +39,14 @@ This fork makes it easy to implement your own modifications to the data flow.
 >
 > **This is a type of data/data structure, that isn't limited to JSON Acceptable types only, but is defined by you.**
 >
-> **Note: DeepCopy callback might receive both State A and  State C as input, but must always output State C**
+> **Note: DeepCopy callback might receive both State A and State C as input, but must always output State C**
 >
 > **Note 2: If your use case is only making sure the data transitions from State B to State A on Load and State A to State B on Upload, you really don't have any differences between State C and State A; Thus meaning DeepCopy, Reconcile and RuntimeWrapper callbacks are useless for you.**
 
 ---
 
 ## Practical Working Example
-To showcase how useful this can get, we got **[CoffeeParser](<https://github.com/Coffilhg/Useful-Modules/tree/CoffeeParser>)** **[(V1.0.2)](<https://github.com/Coffilhg/Useful-Modules/releases/tag/vCoffeeParser/1.0.2>)** and wired it into ProfileStore, using the V2 modifications, this was possible with just less than 90 lines of code - **[ModifyWithCoffeeParser.luau](<server/ModifyWithCoffeeParser.luau>)** then used this in **[ProfileStoreTest (line 183)](<ProfileStoreTest.server.luau#183>)**
+To showcase how useful this can get, we got **[CoffeeParser](<https://github.com/Coffilhg/Useful-Modules/tree/CoffeeParser>)** **[(V1.0.2)](<https://github.com/Coffilhg/Useful-Modules/releases/tag/vCoffeeParser/1.0.2>)** and wired it into ProfileStore, using the V2 modifications, this was possible with just less than 90 lines of code - **[ModifyWithCoffeeParser.luau](<server/ModifyWithCoffeeParser.luau>)** then used this in **[ProfileStoreTest (line 183)](<ProfileStoreTest.server.luau/#L183>)**
 
 <details>
   <summary>All tests passed!</summary>
@@ -77,8 +77,106 @@ With this setup, it is possible to store and manipulate Roblox Datatypes at Runt
 
 
 
+# Changes made to ProfileStore
+
+### Every ProfileStore Object now has Custom Callbacks for easy Data flow customization
+- By default there are no modifications, ProfileStore works just the same as in it's original version. All of the custom callbacks are nil, therefore not used and do not apply any changes to the usual data flow.
+    **[defined in lines 1389-1395 in ProfileStore.luau](<ProfileStore.luau/#L1389-1395>):**
+
+    ```lua
+    custom_callbacks = {
+		DeepCopyTable = nil,
+		ReconcileTable = nil,
+		Decode = nil,
+		Encode = nil,
+		RuntimeWrapper = nil,
+	},
+    ```
+
+    Each of the callbacks can be set using the new methods on ProfileStore Object
+
+### New Methods for ProfileStore objects (All chainable)
+- **:SetDeepCopyTableCallback(callback)**
+    Sets the custom Deep Copy callback; Returns self.
+    
+    Your callback will receive State A or State C input and must output State C
+
+    The <strong>callback</strong> will be called in many cases with a table Profile.Data (from the Datastore, but not limited to), must return a copy of that table (usually modified copying)
+- **:SetReconcileTableCallback(callback)**
+    Sets the custom Reconcile callback; Returns self.
+
+    This one is only ever used when calling **Profile:Reconcile** on Profile objects created via this ProfileStore Object.
+
+    The <strong>callback</strong> will be called at Profile:Reconcile() with ``( target: Profile.Data (Decoded; State A or State C), template: ProfileStore.Template | Profile.ProfileStore.Template (Can be any of the states A, B and C or also a hybrid - the handler is in your hands), profile: Profile<T> ["usually unnecessary/unused, so it was marked with ? to silence the type checker when you leave this unused"] ) -> nothing, but mutate the target to State A``
+- **:SetDecodeCallback(callback)**
+    Sets the custom Decode callback; Returns self.
+
+    The <strong>callback</strong> will be called at the start of transform_function with Profile.Data (from the Datastore), if there was any saved;
+    It will also be called at the start of Profile.New().
+
+    Decode(State B) -> State C
+- **:SetEncodeCallback(callback)** 
+    Sets the custom Encode callback; Returns self.
+
+    The <strong>callback</strong> will be called at the end of transform_function with Profile.Data (after it has been Decoded by the custom Decode callback set using SetDecodeCallback method), before it's returned back into DataStore
+    
+    Encode(State C) -> State B
+- **:SetRuntimeWrapperCallback(callback)**
+    Sets the custom Runtime Overwrite handler callback; Returns self.
+
+    The callback will be executed whenever Profile.Data is manually overwritten at runtime.
+
+    This does happen in the test cases! In an example with CoffeeParser this is not necessary.
+
+    However more complex systems might need this.
+
+    RuntimeWrapper(table that Can be any of the states A, B and C or also a hybrid - the handler is in your hands) -> State A
 
 
+### Methods usage summary:
+```lua
+-- the types StateA, StateB and StateC are not defined anywhere
+-- they are here solely for the looks of the example
+
+local Store = ProfileStore.New("StoreName", {--[[data template]]})
+    :SetDeepCopyTableCallback(function(t: (StateA | StateC)): StateC
+        local copy : StateC = {}
+        -- do your DeepCopy process
+        return copy -- return as State C
+    end)
+    :SetReconcileTableCallback(function(
+        target: (StateA | StateC), -- the table to mutate (make changes to) into StateA
+        template: (StateA | StateB | StateC | any), -- truly your input of the [[data template]]
+        profile -- : ProfileStore.Profile<[[data template]]> -- can be commented out
+        -- why is it (profile) here? - Used internally to ensure custom DeepCopyTable callback is used
+    )
+        -- mutate target to contain all keys from template, that it doesn't have yet
+        -- return nothing
+    end)
+    :SetDecodeCallback(function(data: StateB): StateC
+        local result = {}
+        -- do your Decoding process
+        return result -- return as State C
+    end)
+    :SetEncodeCallback(function(data: StateC): StateB
+        local result = {}
+        -- do your Encoding process
+        return result -- return as State B
+    end)
+    :SetRuntimeWrapperCallback(function(data: (StateA | StateB | StateC | any)): StateA
+        local result = {}
+        -- implement your own rules on what happens whenever Profile.Data is overwritten as a whole
+        return result -- return as State A
+    end)
+```
+
+### Every Profile object now doesn't have ["Data"] field directly
+
+``Profile.__index`` was changed and ``Profile.__newindex`` added.
+
+Profile Objects work just the way they did before, no new methods. The `Data` is now actually stored as `_Data`, however no changes to the code are needed, since per request of `Data` you'd end up receiving `_Data`. This change was only needed to implement Runtime Wrapper Callback functionalities, since `__newindex` only fires when the assigned key doesn't exist yet.
+
+---
 
 # The original README Contents:
 
