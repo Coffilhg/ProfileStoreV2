@@ -1030,6 +1030,12 @@ type ProfileStoreStandard<T> = {
 	GetAsync: (self: any, profile_key: string, version: string?) -> (Profile<T>?),
 	VersionQuery: (self: any, profile_key: string, sort_direction: Enum.SortDirection?, min_date: DateTime | number | nil, max_date: DateTime | number | nil) -> (VersionQuery<T>),
 	RemoveAsync: (self: any, profile_key: string) -> (boolean),
+
+	SetDeepCopyTableCallback: (self: any, callback: ({}) -> ({})) -> (ProfileStoreStandard<T>),
+	SetReconcileTableCallback: (self: any, callback: (target: {}, template: {}, profile: Profile<T>?) -> ()) -> (ProfileStoreStandard<T>),
+	SetDecodeCallback: (self: any, callback: ({} | JSONAcceptable | any) -> ({} | any)) -> (ProfileStoreStandard<T>),
+	SetEncodeCallback: (self: any, callback: ({} | any) -> ({} | JSONAcceptable | any)) -> (ProfileStoreStandard<T>),
+	SetRuntimeWrapperCallback: (self: any, callback: ({} | any) -> ({} | any)) -> (ProfileStoreStandard<T>),
 }
 
 export type ProfileStore<T> = {
@@ -1052,7 +1058,54 @@ export type ProfileStoreModule = {
 }
 
 local Profile = {}
-Profile.__index = Profile
+Profile.__index = function(self, key)
+	--warn(`[{script.Name}]: Accessing Profile.Data`, self)
+	if key == `Data` then
+		return rawget(self, `_Data`)
+	end
+
+	return rawget(Profile, key)
+end
+
+local function ProcessDataRootOverwriteForProfile(profile, value)
+	local profileStore = profile[`ProfileStore`]
+	if type(profileStore) ~= `table` then
+		return value
+	end
+
+	local customCallbacks = profileStore[`custom_callbacks`]
+	if type(customCallbacks) ~= `table` then
+		return value
+	end
+
+
+	local runtimeWrapper = customCallbacks[`RuntimeWrapper`]
+	if type(runtimeWrapper) ~= `function` then
+		return value
+	end
+	
+	local returnedValue = runtimeWrapper(value)
+	if type(returnedValue) ~= `table` then
+		warn(`[{script.Name}]: Returned value by "RuntimeWrapper" custom callback! Returning the input value instead! Profile:`, profile)
+		return value
+	end
+
+	return returnedValue
+end
+
+Profile.__newindex = function(self, key, value)
+	if key == `Data` then
+		--warn(`[{script.Name}]: Setting Profile.Data to`, value, self)
+		if type(value) ~= `table` then
+			warn(`[{script.Name}]: Attempting to overwrite Data to non-table value! Call ignored. Profile:`, self)
+			return
+		end
+		rawset(self, `_Data`, ProcessDataRootOverwriteForProfile(self, value))
+		return
+	end
+
+	rawset(self, key, value)
+end
 
 function Profile.New(raw_data, key_info, profile_store, key, is_mock, session_token)
 
@@ -1073,7 +1126,7 @@ function Profile.New(raw_data, key_info, profile_store, key, is_mock, session_to
 
 	local self = {
 
-		Data = data,
+		_Data = data,
 		LastSavedData = CallDeepCopyFromProfileStore(profile_store, data),
 
 		FirstSessionTime = raw_data.MetaData and raw_data.MetaData.ProfileCreateTime or 0,
@@ -1115,7 +1168,7 @@ end
 function Profile:Reconcile()
 	local CustomReconcileTable = self.ProfileStore.custom_callbacks[`ReconcileTable`]
 	if type(CustomReconcileTable) == "function" then
-		CustomReconcileTable(self.Data, self.ProfileStore.template)
+		CustomReconcileTable(self.Data, self.ProfileStore.template, self)
 		return
 	end
 	ReconcileTable(self.Data, self.ProfileStore.template, self)
@@ -1338,6 +1391,7 @@ function ProfileStore.New(store_name, template)
 			ReconcileTable = nil,
 			Decode = nil,
 			Encode = nil,
+			RuntimeWrapper = nil,
 		},
 
 	}
@@ -1908,41 +1962,57 @@ function ProfileStore:RemoveAsync(profile_key)
 end
 
 -- The <strong>callback</strong> will be called in many cases with a table Profile.Data (from the Datastore), must return a copy of that table (usually modified copying)
-function ProfileStore:SetDeepCopyTableCallback(callback : (Profile.Data) -> ())
+function ProfileStore:SetDeepCopyTableCallback(callback)
 	if type(callback) ~= "function" then
 		error(`Provided callback is not a function!`)
-		return
+		return self
 	end
 	self.custom_callbacks.DeepCopyTable = callback
+	return self
 end
 
--- The <strong>callback</strong> will be called at Profile:Reconcile() with ( target: Profile.Data (Decoded), template: ProfileStore.Template | Profile.ProfileStore.Template )
-function ProfileStore:SetReconcileTableCallback(callback : () -> ())
+-- The <strong>callback</strong> will be called at Profile:Reconcile() with ( target: Profile.Data (Decoded), template: ProfileStore.Template | Profile.ProfileStore.Template, profile: Profile<T> )
+function ProfileStore:SetReconcileTableCallback(callback)
 	if type(callback) ~= "function" then
 		error(`Provided callback is not a function!`)
-		return
+		return self
 	end
 	self.custom_callbacks.ReconcileTable = callback
+	return self
 end
 
 -- The <strong>callback</strong> will be called at the start of transform_function with Profile.Data (from the Datastore), if there was any saved and it will also be called at the start of Profile.New(), before being converted by a DeepCopyTable, this is required for a consistent data structure.
 -- Decode(Profile.Data : JSONAcceptable | whatever was in datastore cloud) -> your own implementation
-function ProfileStore:SetDecodeCallback(callback : (Profile.Data) -> ())
+function ProfileStore:SetDecodeCallback(callback)
 	if type(callback) ~= "function" then
 		error(`Provided callback is not a function!`)
-		return
+		return self
 	end
 	self.custom_callbacks.Decode = callback
+	return self
 end
 
 -- The <strong>callback</strong> will be called at the end of transform_function with Profile.Data (after it has been Decoded by the custom Decode callback set using SetDecodeCallback method), before it's returned back into DataStore
 -- Encode(Profile.Data : your own implementation) -> JSONAcceptable | whatever was in datastore cloud
-function ProfileStore:SetEncodeCallback(callback : (Profile.Data) -> ())
+function ProfileStore:SetEncodeCallback(callback)
 	if type(callback) ~= "function" then
 		error(`Provided callback is not a function!`)
-		return
+		return self
 	end
 	self.custom_callbacks.Encode = callback
+	return self
+end
+
+-- The callback will be executed whenever profile.Data is manually overwritten at runtime.
+-- This does happen in the test cases! In an example with CoffeeParser this is not necessary.
+-- However more complex systems might need this.
+function ProfileStore:SetRuntimeWrapperCallback(callback)
+	if type(callback) ~= "function" then
+		error(`Provided callback is not a function!`)
+		return self
+	end
+	self.custom_callbacks.RuntimeWrapper = callback
+	return self
 end
 
 local ProfileVersionQuery = {}

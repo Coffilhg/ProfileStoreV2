@@ -7,6 +7,11 @@ MAD STUDIO
 	
 --]]
 
+-- Log the time of each test Pass/Fail with status
+local Timestamps = {
+	{`Script Started (✅)`, time()},
+}
+
 local TEST_MOCK = false
 local PREFIX = "[PS_TEST]: "
 
@@ -17,7 +22,7 @@ local ProfileStore
 do
 	local yielded = true
 	task.spawn(function()
-		ProfileStore = require(game.ServerScriptService.ProfileStore)
+		ProfileStore = require(game.ServerScriptService.Server.ProfileStore)
 		yielded = false
 	end)
 	if yielded == true then
@@ -33,6 +38,7 @@ ProfileStore.SetConstant("AUTO_SAVE_PERIOD", AUTO_SAVE_PERIOD) -- Faster auto-sa
 local ServerScriptService = game:GetService("ServerScriptService")
 local HttpService = game:GetService("HttpService")
 local DataStoreService = game:GetService("DataStoreService")
+local ModifyWithCoffeeParser = require(ServerScriptService.Server.ModifyWithCoffeeParser)
 
 local function DeepCopyTable(t)
 	local copy = {}
@@ -83,7 +89,15 @@ local FailCount = 0
 local PassCount = 0
 
 local function TestPass(test_txt: string, is_pass: boolean)
-	print(PREFIX .. test_txt .. ": " .. (if is_pass == true then "PASS ✅" else "FAIL ❌"))
+	local mainPrefix = PREFIX .. test_txt
+	print(mainPrefix .. ": " .. (if is_pass == true then "PASS ✅" else "FAIL ❌"))
+	table.insert(
+		Timestamps,
+		{
+			mainPrefix .. "(" .. (if is_pass == true then "✅" else "❌") .. ")",
+			time()
+		}
+	)
 	if is_pass == true then
 		PassCount += 1
 	else
@@ -152,7 +166,21 @@ local function UniqueKey(identifier: any?)
 end
 
 local Store1Live
-local Store1 = ProfileStore.New(UniqueKey("Store1"), {Counter = 0, Array = {}})
+local Store1 = ProfileStore.New(UniqueKey("Store1"), {
+	Counter = 0,
+	Array = {},
+	Settings = {
+		ShiftlockButtonPos = UDim2.fromScale(0.83, 0.75),
+		CustomMainColor = Color3.fromRGB(255, 60, 60),
+		CustomAccentColor = ColorSequence.new(
+			Color3.fromRGB(60, 222, 255),
+			Color3.fromRGB(194, 3, 247)
+		),
+		OnLeavePosition = Vector3.new(0, 0, 0),
+	},
+	RigMaterial = Enum.Material.Neon,
+})
+ModifyWithCoffeeParser(Store1)
 
 if TEST_MOCK == true then
 	
@@ -759,8 +787,58 @@ task.spawn(function()
 	end
 	
 	-- Summary:
+
+	local function GetStringLengthInCharacters(str: string): number
+		local n = 0
+		for _ in utf8.graphemes(str) do
+			n += 1
+		end
+		return n
+	end
+	local function NormalizeToLength(str: string, length: number): string
+		local spacesToNormalize = length - GetStringLengthInCharacters(str)
+		if spacesToNormalize < 1 then
+			return str
+		end
+
+		return `{str}{table.concat(table.create(spacesToNormalize, " "), "")}`
+	end
 	
 	print(PREFIX .. `Test complete! PASS ✅ = {PassCount}; FAIL ❌ = {FailCount}`)
+	local spacing = `\t|\t`
+	local temporaryLast = nil
+	local longestTextByCharacters = 0 -- can't be negative, so -math.huge is unnecessary
+	for _, stats in pairs(Timestamps) do
+		local length = GetStringLengthInCharacters(table.unpack(stats) :: string) -- typecasting to only use the first element of the tuple
+		if length > longestTextByCharacters then
+			longestTextByCharacters = length
+		end
+	end
+
+	local columnNames = {
+		NormalizeToLength(`Test Name (✅/❌)`, longestTextByCharacters),
+		`Absolute time()`,
+		`Relative time()`
+	}
+	local timestampsOutput = {`|\t{table.concat(columnNames, spacing)}\t|`}
+	table.insert(timestampsOutput, ( (timestampsOutput[1]):gsub(`[^|]`, "-") ))
+	for _, stats in pairs(Timestamps) do
+		local test_txt, timeSinceServerStart = table.unpack(stats)
+		
+		table.insert(
+			timestampsOutput,
+			`|\t{NormalizeToLength(test_txt, longestTextByCharacters)}{spacing}{NormalizeToLength(
+				("%.3f"):format(timeSinceServerStart),
+				GetStringLengthInCharacters(columnNames[2])
+			)}{spacing}{NormalizeToLength(
+				(temporaryLast and ("%.3f"):format(timeSinceServerStart-temporaryLast) or "none"),
+				GetStringLengthInCharacters(columnNames[3])
+			)}\t|`
+		)
+
+		temporaryLast = timeSinceServerStart
+	end
+	print(PREFIX .. `Test Timestamps: \n{table.concat(timestampsOutput, `\n`)}`)
 	
 	if FailCount == 0 then
 		print(PREFIX .. `Test PASSED ✅✅✅!`)
