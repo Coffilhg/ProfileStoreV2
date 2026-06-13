@@ -176,6 +176,73 @@ local Store = ProfileStore.New("StoreName", {--[[data template]]})
 
 Profile Objects work just the way they did before, no new methods. The `Data` is now actually stored as `_Data`, however no changes to the code are needed, since per request of `Data` you'd end up receiving `_Data`. This change was only needed to implement Runtime Wrapper Callback functionalities, since `__newindex` only fires when the assigned key doesn't exist yet.
 
+### ProfileStore object creation has two new additional params
+```lua
+-- learn more about datastores here:
+-- https://create.roblox.com/docs/cloud-services/data-stores/versioning-listing-and-caching
+--[=[-- quotes from the link above:
+
+>   ⚠️ For new experiences, use listing and prefixes to organize keys in your data
+>   store instead of the legacy scopes feature. For existing experiences that use
+>   scopes, continue using them.
+
+>   When you use the AllScopes property, ListKeysAsync() returns every key with their
+>   scope as the prefix argument, such as global/player_data_1234 or houses/house3.
+>   Remember that the default scope is global.
+
+    Personal advice by Coffilhg:
+    
+    Not using scopes means you will be using the Key name to fit both your scope the key,
+    that means you have only 50 characters to fit scope + key.
+    Also when listing with `DataStoreOptions.AllScopes = true` and DataStore:ListKeysAsync()
+    you'll see the following format `global/{your custom scope}{key}`
+
+    Using specific scopes is not recommended by Roblox, as stated in the quote, I believe this is
+    because that'd mean you need to get your DataStore in multiple Instances, e.g.
+    local MyDatastoreWithScopeA = ProfileStore.New("MyDatastore", {--[[data template]]}, "ScopeA")
+    local MyDatastoreWithScopeB = ProfileStore.New("MyDatastore", {--[[data template]]}, "ScopeB")
+    Now you have 50 characters for the scope and 50 characters for the key and the scopes aren't
+    messed up to be in the `global/{your custom scope}{key}` format, but there's a better way.
+
+    You can do the following:
+    local MyDatastoreWithAllScopes = ProfileStore.New("MyDatastore", {--[[data template]]}, nil, true)
+    then whenever writing keys, do it using the `{scope}/{key}` format for your keys, Roblox then
+    handles scope and key separately, this way you have 50 characters for both scope and the key
+    later you can do :ListKeysAsync(`{scope}`) or
+    DataStoreService:GetDataStore("MyDatastore", `{scope}`):ListKeysAsync()
+    this would be the best, merged approach
+
+    Check out
+    other/DatastoreScopesListing.luau in this repository
+    to test this yourself
+
+    read more about the limits here:
+    https://create.roblox.com/docs/cloud-services/data-stores/error-codes-and-limits#data-limits
+
+
+--]=]--
+
+
+-- highlights:
+function ProfileStore.New(store_name, template, scope, allScopes)
+    -- original code from ProfileService
+
+    local options = Instance.new("DataStoreOptions")
+	options:SetExperimentalFeatures({v2 = true})
+	options.AllScopes = not not allScopes
+
+	local effectiveScope = nil
+	if options.AllScopes == true then
+		effectiveScope = ""
+	elseif type(scope) == `string` then
+		effectiveScope = scope
+	end
+
+    -- original code from ProfileService
+
+    self.data_store = DataStoreService:GetDataStore(store_name, effectiveScope, options)
+```
+
 ---
 
 # The original README Contents:

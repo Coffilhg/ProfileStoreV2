@@ -1056,7 +1056,7 @@ export type ProfileStoreModule = {
 	OnOverwrite: {Connect: (self: any, listener: (store_name: string, profile_key: string) -> ()) -> ({Disconnect: (self: any) -> ()})},
 	OnCriticalToggle: {Connect: (self: any, listener: (is_critical: boolean) -> ()) -> ({Disconnect: (self: any) -> ()})},
 	DataStoreState: "NotReady" | "NoInternet" | "NoAccess" | "Access",
-	New: <T>(store_name: string, template: (T & JSONAcceptable)?) -> (ProfileStore<T>),
+	New: <T>(store_name: string, template: (T & JSONAcceptable)?, scope: string?, allScopes: boolean?) -> (ProfileStore<T>),
 	SetConstant: (name: ConstantName, value: number) -> ()
 }
 
@@ -1336,7 +1336,7 @@ function ProfileStore.Test()
 	}
 end
 
-function ProfileStore.New(store_name, template)
+function ProfileStore.New(store_name, template, scope, allScopes)
 
 	template = template or {}
 
@@ -1402,6 +1402,14 @@ function ProfileStore.New(store_name, template)
 
 	local options = Instance.new("DataStoreOptions")
 	options:SetExperimentalFeatures({v2 = true})
+	options.AllScopes = not not allScopes
+
+	local effectiveScope = nil
+	if options.AllScopes == true then
+		effectiveScope = ""
+	elseif type(scope) == `string` then
+		effectiveScope = scope
+	end
 
 	if DataStoreState == "NotReady" then
 
@@ -1414,7 +1422,7 @@ function ProfileStore.New(store_name, template)
 			repeat task.wait() until DataStoreState ~= "NotReady"
 
 			if DataStoreState == "Access" then
-				self.data_store = DataStoreService:GetDataStore(store_name, nil, options)
+				self.data_store = DataStoreService:GetDataStore(store_name, effectiveScope, options)
 			end
 
 			self.is_ready = true
@@ -1423,7 +1431,7 @@ function ProfileStore.New(store_name, template)
 
 	elseif DataStoreState == "Access" then
 
-		self.data_store = DataStoreService:GetDataStore(store_name, nil, options)
+		self.data_store = DataStoreService:GetDataStore(store_name, effectiveScope, options)
 
 	end
 

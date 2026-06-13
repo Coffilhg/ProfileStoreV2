@@ -1,1 +1,5 @@
-{"name":"ProfileStore","className":"ModuleScript","filePaths":["ProfileStore.luau","default.project.json"]}
+{
+  "name": "ProfileStoreV2",
+  "className": "ModuleScript",
+  "filePaths": ["ProfileStore.luau", "default.project.json"]
+}

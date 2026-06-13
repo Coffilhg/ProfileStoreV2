@@ -1,8 +1,13 @@
 [package]
-name = "lm-loleris/profilestore"
-description = "Periodic DataStore saving solution with session locking"
-version = "1.0.3"
+name = "coffilhg/profilestoreV2"
+description = "Periodic DataStore saving solution with session locking + Core Customization \n(A Fork of ProfileStore, original ProfileStore was Developed by loleris); \nOriginal ProfileStore Repository link: https://github.com/MadStudioRoblox/ProfileService"
+version = "2.0.0"
 registry = "https://github.com/UpliftGames/wally-index"
+license = "Apache-2.0"
+authors = ["MadStudioRoblox", "Coffilhg <coffilhg@gmail.com>"]
+repository = "https://github.com/Coffilhg/ProfileStoreV2"
 realm = "server"
+
+exclude = ["server", "other"]
 
 [dependencies]
