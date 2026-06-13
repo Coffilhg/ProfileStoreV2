@@ -6,6 +6,17 @@ This fork makes it easy to implement your own modifications to the data flow.
 
 ---
 
+## Available Here!
+- **[This repository](ProfileStore.luau) ~ [ProfileStore.luau](ProfileStore.luau)**
+- **[Wally](<https://wally.run/package/coffilhg/profilestorev2>)**
+
+    ```toml
+    ProfileStoreV2 = "coffilhg/profilestorev2@2.0.0"
+    ```
+
+
+---
+
 ## Definitions
 
 **Roblox Datatypes**
@@ -20,7 +31,7 @@ This fork makes it easy to implement your own modifications to the data flow.
 > >
 > > > “The data (key value) is also stored as a string, regardless of its initial type. You can check the size of the data with the `JSONEncode()` function, which converts Luau data into a serialized JSON table.”
 > 
-> So as a type it would be defined like this: (**[ProfileStore.luau line 994](<ProfileStore.luau/#L994>)**)
+> So as a type it would be defined like this: (**[ProfileStore.luau line 997](<ProfileStore.luau/#L997>)**)
 > 
 > ```lua
 > type JSONAcceptable = { JSONAcceptable } | { [string]: JSONAcceptable } | number | string | boolean | buffer
@@ -81,7 +92,7 @@ With this setup, it is possible to store and manipulate Roblox Datatypes at Runt
 
 ### Every ProfileStore Object now has Custom Callbacks for easy Data flow customization
 - By default there are no modifications, ProfileStore works just the same as in it's original version. All of the custom callbacks are nil, therefore not used and do not apply any changes to the usual data flow.
-    **[defined in lines 1389-1395 in ProfileStore.luau](<ProfileStore.luau/#L1389-1395>):**
+    **[defined in lines 1392-1398 in ProfileStore.luau](<ProfileStore.luau/#L1392-1398>):**
 
     ```lua
     custom_callbacks = {
@@ -241,6 +252,9 @@ function ProfileStore.New(store_name, template, scope, allScopes)
     -- original code from ProfileService
 
     self.data_store = DataStoreService:GetDataStore(store_name, effectiveScope, options)
+
+    -- original code from ProfileService
+end
 ```
 
 ---
