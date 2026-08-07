@@ -517,7 +517,7 @@ local function MockUpdateAsync(mock_data_store, profile_store_name, key, transfo
 
 end
 
-local function UpdateAsync(profile_store, profile_key, transform_params, is_user_mock, is_get_call, version) --> loaded_data, key_info
+local function UpdateAsync(profile_store, profile_key, transform_params, is_user_mock, is_get_call, version, escapeCallback) --> loaded_data, key_info
 	--transform_params = {
 	--	ExistingProfileHandle = function(latest_data),
 	--	MissingProfileHandle = function(latest_data),
@@ -603,26 +603,46 @@ local function UpdateAsync(profile_store, profile_key, transform_params, is_user
 			if overwritten == true then
 				latest_data.WasOverwritten = true -- Temporary tag that will be removed on first save
 			end
-
+			
 			local encode = profile_store.custom_callbacks[`Encode`]
-			if type(encode) == "function" then
+			local isEncodeCallbackProvided = type(encode) == "function"
+			local isEscapeCallbackProvided = type(escapeCallback) == "function"
+			local stateCData
+			
+			if isEncodeCallbackProvided or isEscapeCallbackProvided then
 				-- Use DeepCopy to convert from State A to State C before Encoding
-				local stateCData = CallDeepCopyFromProfileStore(profile_store, latest_data.Data)
-
+				-- and before taking it back to the LastSavedData
+				stateCData = CallDeepCopyFromProfileStore(profile_store, latest_data.Data)
+			end
+			
+			if isEscapeCallbackProvided then
+				-- if anything else needs to be escaped in the future, you'd want to
+				-- make the first argument be a header like "StateCDataPreEncode" and
+				-- move everything else (i.e. stateCData in this case) that'd allow
+				-- escapeCallback("HEADER", ...) flexibility
+				-- but for now, this is the only use case, so no header is needed.
+				escapeCallback(stateCData)
+			end
+			
+			if isEncodeCallbackProvided then
 				latest_data.Data = encode(stateCData)
 			end
 
 			return latest_data, latest_data.UserIds, latest_data.RobloxMetaData
 		end
+		
+		local function RouteDeepCopy(t)
+			return CallDeepCopyFromProfileStore(profile_store, t)
+		end
 
 		if is_user_mock == true then -- Used when the profile is accessed through ProfileStore.Mock
 
-			loaded_data, key_info = MockUpdateAsync(UserMockStore, profile_store.Name, profile_key, transform_function, is_get_call, CallDeepCopyFromProfileStore(profile_store))
+			loaded_data, key_info = MockUpdateAsync(UserMockStore, profile_store.Name, profile_key, transform_function, is_get_call, RouteDeepCopy)
 			task.wait() -- Simulate API call yield
 
 		elseif DataStoreState ~= "Access" then -- Used when API access is disabled
 
-			loaded_data, key_info = MockUpdateAsync(MockStore, profile_store.Name, profile_key, transform_function, is_get_call, CallDeepCopyFromProfileStore(profile_store))
+			loaded_data, key_info = MockUpdateAsync(MockStore, profile_store.Name, profile_key, transform_function, is_get_call, RouteDeepCopy)
 			task.wait() -- Simulate API call yield
 
 		else
@@ -764,6 +784,8 @@ local function SaveProfileAsync(profile, is_ending_session, is_overwriting, last
 		if is_ending_session ~= true then
 			repeat_save_flag = false
 		end
+		
+		local lastSavedDataPreEncode
 
 		local loaded_data, key_info = UpdateAsync(
 			profile.ProfileStore,
@@ -838,7 +860,12 @@ local function SaveProfileAsync(profile, is_ending_session, is_overwriting, last
 
 				end,
 			},
-			profile.is_mock
+			profile.is_mock,
+			nil,
+			nil,
+			function(stateCData)
+				lastSavedDataPreEncode = stateCData
+			end
 		)
 
 		if loaded_data ~= nil and key_info ~= nil then
@@ -901,7 +928,7 @@ local function SaveProfileAsync(profile, is_ending_session, is_overwriting, last
 			-- Updating profile values:
 
 			profile.KeyInfo = key_info
-			profile.LastSavedData = loaded_data.Data
+			profile.LastSavedData = lastSavedDataPreEncode --loaded_data.Data
 			profile.global_updates = loaded_data.GlobalUpdates and loaded_data.GlobalUpdates[2] or {}
 
 			if session_owns_profile == true then
@@ -1026,19 +1053,20 @@ export type VersionQuery<T> = {
 	NextAsync: (self: any) -> (Profile<T>?),
 }
 
+type profile_key = string
 type ProfileStoreStandard<T> = {
 	Name: string,
-	StartSessionAsync: (self: any, profile_key: string, params: {Steal: boolean?}) -> (Profile<T>?),
-	MessageAsync: (self: any, profile_key: string, message: JSONAcceptable) -> (boolean),
-	GetAsync: (self: any, profile_key: string, version: string?) -> (Profile<T>?),
-	VersionQuery: (self: any, profile_key: string, sort_direction: Enum.SortDirection?, min_date: DateTime | number | nil, max_date: DateTime | number | nil) -> (VersionQuery<T>),
-	RemoveAsync: (self: any, profile_key: string) -> (boolean),
+	StartSessionAsync: (self: any, profile_key: profile_key, params: {Steal: boolean?}) -> (Profile<T>?),
+	MessageAsync: (self: any, profile_key: profile_key, message: JSONAcceptable) -> (boolean),
+	GetAsync: (self: any, profile_key: profile_key, version: string?) -> (Profile<T>?),
+	VersionQuery: (self: any, profile_key: profile_key, sort_direction: Enum.SortDirection?, min_date: DateTime | number | nil, max_date: DateTime | number | nil) -> (VersionQuery<T>),
+	RemoveAsync: (self: any, profile_key: profile_key) -> (boolean),
 
 	SetDeepCopyTableCallback: (self: any, callback: ({}) -> ({})) -> (ProfileStoreStandard<T>),
 	SetReconcileTableCallback: (self: any, callback: (target: {}, template: {}, profile: Profile<T>?) -> ()) -> (ProfileStoreStandard<T>),
 	SetDecodeCallback: (self: any, callback: ({} | JSONAcceptable | any) -> ({} | any)) -> (ProfileStoreStandard<T>),
 	SetEncodeCallback: (self: any, callback: ({} | any) -> ({} | JSONAcceptable | any)) -> (ProfileStoreStandard<T>),
-	SetRuntimeWrapperCallback: (self: any, callback: ({} | any) -> ({} | any)) -> (ProfileStoreStandard<T>),
+	SetRuntimeWrapperCallback: (self: any, callback: ({} | any, profile: Profile<T>) -> ({} | any)) -> (ProfileStoreStandard<T>),
 }
 
 export type ProfileStore<T> = {
@@ -1052,8 +1080,8 @@ type ConstantName = "AUTO_SAVE_PERIOD" | "LOAD_REPEAT_PERIOD" | "FIRST_LOAD_REPE
 export type ProfileStoreModule = {
 	IsClosing: boolean,
 	IsCriticalState: boolean,
-	OnError: {Connect: (self: any, listener: (message: string, store_name: string, profile_key: string) -> ()) -> ({Disconnect: (self: any) -> ()})},
-	OnOverwrite: {Connect: (self: any, listener: (store_name: string, profile_key: string) -> ()) -> ({Disconnect: (self: any) -> ()})},
+	OnError: {Connect: (self: any, listener: (message: string, store_name: string, profile_key: profile_key) -> ()) -> ({Disconnect: (self: any) -> ()})},
+	OnOverwrite: {Connect: (self: any, listener: (store_name: string, profile_key: profile_key) -> ()) -> ({Disconnect: (self: any) -> ()})},
 	OnCriticalToggle: {Connect: (self: any, listener: (is_critical: boolean) -> ()) -> ({Disconnect: (self: any) -> ()})},
 	DataStoreState: "NotReady" | "NoInternet" | "NoAccess" | "Access",
 	New: <T>(store_name: string, template: (T & JSONAcceptable)?, scope: string?, allScopes: boolean?) -> (ProfileStore<T>),
@@ -1087,7 +1115,7 @@ local function ProcessDataRootOverwriteForProfile(profile, value)
 		return value
 	end
 	
-	local returnedValue = runtimeWrapper(value)
+	local returnedValue = runtimeWrapper(value, profile)
 	if type(returnedValue) ~= `table` then
 		warn(`[{script.Name}]: Returned value by "RuntimeWrapper" custom callback! Returning the input value instead! Profile:`, profile)
 		return value
@@ -1467,7 +1495,7 @@ local function RobloxMessageSubscription(profile, unique_session_id)
 
 end
 
-function ProfileStore:StartSessionAsync(profile_key, params)
+function ProfileStore:StartSessionAsync(profile_key: profile_key, params)
 
 	local is_mock = ReadMockFlag()
 
@@ -1736,7 +1764,7 @@ function ProfileStore:StartSessionAsync(profile_key, params)
 
 end
 
-function ProfileStore:MessageAsync(profile_key, message)
+function ProfileStore:MessageAsync(profile_key: profile_key, message)
 
 	local is_mock = ReadMockFlag()
 
@@ -1834,7 +1862,7 @@ function ProfileStore:MessageAsync(profile_key, message)
 
 end
 
-function ProfileStore:GetAsync(profile_key, version)
+function ProfileStore:GetAsync(profile_key: profile_key, version)
 
 	local is_mock = ReadMockFlag()
 
@@ -1912,7 +1940,7 @@ function ProfileStore:GetAsync(profile_key, version)
 
 end
 
-function ProfileStore:RemoveAsync(profile_key)
+function ProfileStore:RemoveAsync(profile_key: profile_key)
 
 	local is_mock = ReadMockFlag()
 
@@ -2197,7 +2225,7 @@ function ProfileVersionQuery:NextAsync()
 
 end
 
-function ProfileStore:VersionQuery(profile_key, sort_direction, min_date, max_date)
+function ProfileStore:VersionQuery(profile_key: profile_key, sort_direction, min_date, max_date)
 
 	local is_mock = ReadMockFlag()
 

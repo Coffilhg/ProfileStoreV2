@@ -64,22 +64,22 @@ To showcase how useful this can get, we got **[CoffeeParser](<https://github.com
 
   ## [PS_TEST]: Test complete! PASS ✅ = 13; FAIL ❌ = 0
   ## [PS_TEST]: Test Timestamps: 
-  |	Test Name (✅/❌)                                       	|	Absolute time()	|	Relative time()	|
-  |------------------------------------------------------------|-----------------|-----------------|
-  |	Script Started (✅)                                    	|	0.000          	|	none           	|
-  |	[PS_TEST]: Versioning test(✅)                         	|	2.208          	|	2.208          	|
-  |	[PS_TEST]: Payload test(✅)                            	|	14.025         	|	11.817         	|
-  |	[PS_TEST]: DataStore KeyInfo (Roblox Metadata) test(✅)	|	15.058         	|	1.033          	|
-  |	[PS_TEST]: Message test(✅)                            	|	20.458         	|	5.400          	|
-  |	[PS_TEST]: LastSavedData test(✅)                      	|	32.392         	|	11.933         	|
-  |	[PS_TEST]: .OnOverwrite test(✅)                       	|	33.725         	|	1.333          	|
-  |	[PS_TEST]: Test #1(✅)                                 	|	35.808         	|	2.083          	|
-  |	[PS_TEST]: Test #2(✅)                                 	|	38.475         	|	2.667          	|
-  |	[PS_TEST]: Test #3(✅)                                 	|	39.592         	|	1.117          	|
-  |	[PS_TEST]: Test #4(✅)                                 	|	51.125         	|	11.533         	|
-  |	[PS_TEST]: Test #5(✅)                                 	|	62.542         	|	11.417         	|
-  |	[PS_TEST]: Test #6(✅)                                 	|	63.558         	|	1.017          	|
-  |	[PS_TEST]: Cache test(✅)                              	|	66.592         	|	3.033          	|
+|	Test Name (✅/❌)                                       	|	Absolute time()	|	Relative time()	|
+|------------------------------------------------------------|-----------------|-----------------|
+|	Script Started (✅)                                    	|	0.000          	|	none           	|
+|	[PS_TEST]: Versioning test(✅)                         	|	1.500          	|	1.500          	|
+|	[PS_TEST]: Payload test(✅)                            	|	13.608         	|	12.108         	|
+|	[PS_TEST]: DataStore KeyInfo (Roblox Metadata) test(✅)	|	14.792         	|	1.183          	|
+|	[PS_TEST]: Message test(✅)                            	|	20.642         	|	5.850          	|
+|	[PS_TEST]: LastSavedData test(✅)                      	|	32.542         	|	11.900         	|
+|	[PS_TEST]: .OnOverwrite test(✅)                       	|	34.108         	|	1.567          	|
+|	[PS_TEST]: Test #1(✅)                                 	|	36.042         	|	1.933          	|
+|	[PS_TEST]: Test #2(✅)                                 	|	38.808         	|	2.767          	|
+|	[PS_TEST]: Test #3(✅)                                 	|	39.975         	|	1.167          	|
+|	[PS_TEST]: Test #4(✅)                                 	|	51.017         	|	11.042         	|
+|	[PS_TEST]: Test #5(✅)                                 	|	62.629         	|	11.613         	|
+|	[PS_TEST]: Test #6(✅)                                 	|	63.917         	|	1.288          	|
+|	[PS_TEST]: Cache test(✅)                              	|	66.950         	|	3.033          	|
   ## [PS_TEST]: Test PASSED ✅✅✅!
 
 </details>
@@ -141,7 +141,11 @@ With this setup, it is possible to store and manipulate Roblox Datatypes at Runt
 
     However more complex systems might need this.
 
-    RuntimeWrapper(table that Can be any of the states A, B and C or also a hybrid - the handler is in your hands) -> State A
+    RuntimeWrapper(
+        table that Can be any of the states A, B and C or also a hybrid - the handler is in your hands,
+        
+        Profile to which the return value will be written
+    ) -> State A
 
 
 ### Methods usage summary:
@@ -162,6 +166,8 @@ local Store = ProfileStore.New("StoreName", {--[[data template]]})
         -- why is it (profile) here? - Used internally to ensure custom DeepCopyTable callback is used
     )
         -- mutate target to contain all keys from template, that it doesn't have yet
+        -- if your StateC and StateA are really different, you shall mutate the target
+        -- to become StateA
         -- return nothing
     end)
     :SetDecodeCallback(function(data: StateB): StateC
@@ -181,11 +187,39 @@ local Store = ProfileStore.New("StoreName", {--[[data template]]})
     end)
 ```
 
+---
+
 ### Every Profile object now doesn't have ["Data"] field directly
 
 ``Profile.__index`` was changed and ``Profile.__newindex`` added.
 
 Profile Objects work just the way they did before, no new methods. The `Data` is now actually stored as `_Data`, however no changes to the code are needed, since per request of `Data` you'd end up receiving `_Data`. This change was only needed to implement Runtime Wrapper Callback functionalities, since `__newindex` only fires when the assigned key doesn't exist yet.
+
+### Note on `Profile.LastSavedData`
+It was inconsistent in the first Release (v2.0.0) and would be StateC at `Profile.New`, but become StateB after any save;
+
+Now it was made consistent and will always be StateC (by DeepCopy or your own DeepCopy Callback). Here's why it'll be StateC.
+
+While changing it to be StateB is the easiest approach and would only require a single encode on every `Profile.New` call, if you've added an Encode callback, it might be annoying to work with encoded data or even wasteful having to decode it for every edit.
+
+On the other hand StateA, if it really is different from StateC in your setup, it might get very complex to guarantee StateA. Moreover StateA, when different from StateC, is likely to contain metatables, wrappers, references and so on. Keeping a copy with all of the functionality added by such additions not only doubles the memory, but might also mismatch with what was actually saved to the Datastore.
+
+Lastly StateC is the canonical "plain Roblox data" representation. The perfect middle ground:
+> **Produced by `DeepCopy` and `Decode`**
+>
+> **Consumed by `Encode`**
+>
+> **Allowed to contain both Primitive (JSON Acceptable) and Roblox Datatypes**
+
+It also eliminates the need for any additional operations like Encoding or running Reconcillation.
+
+We only need to let the already computed StateC to escape the `transform_function` from `UpdateAsync` to `SaveProfileAsync`.
+
+Many approaches were evaluated. Making `UpdateAsync` return a third value or writing a temporary value to `Profile` like `_PendingLastSavedData`, would both work and it wouldn't break any of the original code, however most of the original code does not need it either. We only need it for `SaveProfileAsync`, so...
+
+The best approach is adding an optional additional parameter - `escapeCallback`, which can be scaled in the future if needed, but for now will only be called with the StateC to be cached only inside `SaveProfileAsync`, where the cached result is only used under the condition that `loaded_data ~= nil and key_info ~= nil` (so it's guaranteed here)
+
+---
 
 ### ProfileStore object creation has two new additional params
 ```lua
