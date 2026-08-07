@@ -1,0 +1,8 @@
+[package]
+name = "coffilhg/profilestorev2"
+authors = [ "Coffilhg <coffilhg@gmail.com>" ]
+content_root = "ProfileStore.luau"
+version = "2.0.1"
+license = "Apache-2.0"
+
+[dependencies]
