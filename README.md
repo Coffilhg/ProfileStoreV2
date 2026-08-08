@@ -11,7 +11,7 @@ This fork makes it easy to implement your own modifications to the data flow.
 - **[Wally](<https://wally.run/package/coffilhg/profilestorev2>)**
 
     ```toml
-    ProfileStoreV2 = "coffilhg/profilestorev2@2.0.1"
+    ProfileStoreV2 = "coffilhg/profilestorev2@2.0.2"
     ```
 
 

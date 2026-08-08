@@ -1,3 +1,6 @@
+# v2.0.2
+- Cherry-Picked **[PR#22 ~ "Fix buffers being copied by reference in deep copies"](<https://github.com/MadStudioRoblox/ProfileStore/pull/22>)** from upstream.
+
 # v2.0.1
 - Improved `RuntimeWrapperCallback` - it is now called with `({} | any, profile: Profile<T>)` (previously it was just `({} | any)`);
     > `{} | any` is the value that is being written to profile.Data
