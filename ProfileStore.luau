@@ -527,7 +527,7 @@ local function MockUpdateAsync(mock_data_store, profile_store_name, key, transfo
 
 end
 
-local function UpdateAsync(profile_store, profile_key, transform_params, is_user_mock, is_get_call, version, escapeCallback) --> loaded_data, key_info
+local function UpdateAsync(profile_store, profile_key, transform_params, is_user_mock, is_get_call, version, escapeCallback, is_decode_ignored) --> loaded_data, key_info
 	--transform_params = {
 	--	ExistingProfileHandle = function(latest_data),
 	--	MissingProfileHandle = function(latest_data),
@@ -561,9 +561,11 @@ local function UpdateAsync(profile_store, profile_key, transform_params, is_user
 				if type(latest_data.Data) == "table" and type(latest_data.MetaData) == "table" and type(latest_data.GlobalUpdates) == "table" then
 
 					-- Decode scenario 2
-					local decode = profile_store.custom_callbacks[`Decode`]
-					if type(decode) == "function" then
-						latest_data.Data = decode(latest_data.Data)
+					if is_decode_ignored ~= true then
+						local decode = profile_store.custom_callbacks[`Decode`]
+						if type(decode) == "function" then
+							latest_data.Data = decode(latest_data.Data)
+						end
 					end
 
 					-- Regular profile structure detected:
@@ -875,7 +877,8 @@ local function SaveProfileAsync(profile, is_ending_session, is_overwriting, last
 			nil,
 			function(stateCData)
 				lastSavedDataPreEncode = stateCData
-			end
+			end,
+			true
 		)
 
 		if loaded_data ~= nil and key_info ~= nil then
@@ -1072,8 +1075,8 @@ type ProfileStoreStandard<T> = {
 	VersionQuery: (self: any, profile_key: profile_key, sort_direction: Enum.SortDirection?, min_date: DateTime | number | nil, max_date: DateTime | number | nil) -> (VersionQuery<T>),
 	RemoveAsync: (self: any, profile_key: profile_key) -> (boolean),
 
-	SetDeepCopyTableCallback: (self: any, callback: ({}) -> ({})) -> (ProfileStoreStandard<T>),
-	SetReconcileTableCallback: (self: any, callback: (target: {}, template: {}, profile: Profile<T>?) -> ()) -> (ProfileStoreStandard<T>),
+	SetDeepCopyTableCallback: (self: any, callback: ({} | any) -> ({} | any)) -> (ProfileStoreStandard<T>),
+	SetReconcileTableCallback: (self: any, callback: (target: {} | any, template: {} | any, profile: Profile<T>?) -> ()) -> (ProfileStoreStandard<T>),
 	SetDecodeCallback: (self: any, callback: ({} | JSONAcceptable | any) -> ({} | any)) -> (ProfileStoreStandard<T>),
 	SetEncodeCallback: (self: any, callback: ({} | any) -> ({} | JSONAcceptable | any)) -> (ProfileStoreStandard<T>),
 	SetRuntimeWrapperCallback: (self: any, callback: ({} | any, profile: Profile<T>) -> ({} | any)) -> (ProfileStoreStandard<T>),
@@ -1287,7 +1290,7 @@ function Profile:MessageHandler(fn)
 				locked_updates[index] = true
 			end
 			
-			local send_update_data = DeepCopyTable(update_data)
+			local send_update_data = CallDeepCopyFromProfile(self, update_data)
 
 			task.spawn(fn, send_update_data, processed_callback)
 
@@ -2030,7 +2033,7 @@ function ProfileStore:SetReconcileTableCallback(callback)
 	return self
 end
 
--- The <strong>callback</strong> will be called at the start of transform_function with Profile.Data (from the Datastore), if there was any saved and it will also be called at the start of Profile.New(), before being converted by a DeepCopyTable, this is required for a consistent data structure.
+-- The <strong>callback</strong> will be called at the start of transform_function with Profile.Data (from the Datastore), if there was any saved and it will also be called at the start of Profile.New(), this is required for a consistent data structure.
 -- Decode(Profile.Data : JSONAcceptable | whatever was in datastore cloud) -> your own implementation
 function ProfileStore:SetDecodeCallback(callback)
 	if type(callback) ~= "function" then

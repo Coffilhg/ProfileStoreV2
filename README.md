@@ -11,7 +11,12 @@ This fork makes it easy to implement your own modifications to the data flow.
 - **[Wally](<https://wally.run/package/coffilhg/profilestorev2>)**
 
     ```toml
-    ProfileStoreV2 = "coffilhg/profilestorev2@2.0.2"
+    ProfileStoreV2 = "coffilhg/profilestorev2@2.0.3"
+    ```
+- **[Rotriever](<https://github.com/Coffilhg/ProfileStoreV2/releases/tag/v2.0.3>)**
+
+    ```toml
+    ProfileStoreV2 = "github.com/Coffilhg/ProfileStoreV2@2.0.3"
     ```
 
 
@@ -67,19 +72,19 @@ To showcase how useful this can get, we got **[CoffeeParser](<https://github.com
 |	Test Name (✅/❌)                                       	|	Absolute time()	|	Relative time()	|
 |------------------------------------------------------------|-----------------|-----------------|
 |	Script Started (✅)                                    	|	0.000          	|	none           	|
-|	[PS_TEST]: Versioning test(✅)                         	|	1.500          	|	1.500          	|
-|	[PS_TEST]: Payload test(✅)                            	|	13.608         	|	12.108         	|
-|	[PS_TEST]: DataStore KeyInfo (Roblox Metadata) test(✅)	|	14.792         	|	1.183          	|
-|	[PS_TEST]: Message test(✅)                            	|	20.642         	|	5.850          	|
-|	[PS_TEST]: LastSavedData test(✅)                      	|	32.542         	|	11.900         	|
-|	[PS_TEST]: .OnOverwrite test(✅)                       	|	34.108         	|	1.567          	|
-|	[PS_TEST]: Test #1(✅)                                 	|	36.042         	|	1.933          	|
-|	[PS_TEST]: Test #2(✅)                                 	|	38.808         	|	2.767          	|
-|	[PS_TEST]: Test #3(✅)                                 	|	39.975         	|	1.167          	|
-|	[PS_TEST]: Test #4(✅)                                 	|	51.017         	|	11.042         	|
-|	[PS_TEST]: Test #5(✅)                                 	|	62.629         	|	11.613         	|
-|	[PS_TEST]: Test #6(✅)                                 	|	63.917         	|	1.288          	|
-|	[PS_TEST]: Cache test(✅)                              	|	66.950         	|	3.033          	|
+|	[PS_TEST]: Versioning test(✅)                         	|	1.904          	|	1.904          	|
+|	[PS_TEST]: Payload test(✅)                            	|	13.854         	|	11.950         	|
+|	[PS_TEST]: DataStore KeyInfo (Roblox Metadata) test(✅)	|	14.888         	|	1.033          	|
+|	[PS_TEST]: Message test(✅)                            	|	20.538         	|	5.650          	|
+|	[PS_TEST]: LastSavedData test(✅)                      	|	32.321         	|	11.783         	|
+|	[PS_TEST]: .OnOverwrite test(✅)                       	|	33.767         	|	1.446          	|
+|	[PS_TEST]: Test #1(✅)                                 	|	35.721         	|	1.954          	|
+|	[PS_TEST]: Test #2(✅)                                 	|	38.283         	|	2.563          	|
+|	[PS_TEST]: Test #3(✅)                                 	|	39.388         	|	1.104          	|
+|	[PS_TEST]: Test #4(✅)                                 	|	50.933         	|	11.546         	|
+|	[PS_TEST]: Test #5(✅)                                 	|	62.583         	|	11.650         	|
+|	[PS_TEST]: Test #6(✅)                                 	|	63.700         	|	1.117          	|
+|	[PS_TEST]: Cache test(✅)                              	|	66.733         	|	3.033          	|
   ## [PS_TEST]: Test PASSED ✅✅✅!
 
 </details>
@@ -123,9 +128,9 @@ With this setup, it is possible to store and manipulate Roblox Datatypes at Runt
     Sets the custom Decode callback; Returns self.
 
     The <strong>callback</strong> will be called at the start of transform_function with Profile.Data (from the Datastore), if there was any saved;
-    It will also be called at the start of Profile.New().
+    It will also be called at the start of Profile.New() to write LastSavedData. The `Profile.Data` (`_Data`) is directly what your Decode callback outputs or fresh data from datastore, if no custom Decode callback is set.
 
-    Decode(State B) -> State C
+    Decode(State B) -> State A
 - **:SetEncodeCallback(callback)** 
     Sets the custom Encode callback; Returns self.
 
@@ -147,6 +152,10 @@ With this setup, it is possible to store and manipulate Roblox Datatypes at Runt
         Profile to which the return value will be written
     ) -> State A
 
+## IMPORTANT Note about Encoding/Decoding
+
+**Encoding and Decoding** must be lossless.
+
 
 ### Methods usage summary:
 ```lua
@@ -154,10 +163,10 @@ With this setup, it is possible to store and manipulate Roblox Datatypes at Runt
 -- they are here solely for the looks of the example
 
 local Store = ProfileStore.New("StoreName", {--[[data template]]})
-    :SetDeepCopyTableCallback(function(t: (StateA | StateC)): StateC
-        local copy : StateC = {}
+    :SetDeepCopyTableCallback(function(t: (StateA | StateC)): StateA
+        local copy : StateA = {}
         -- do your DeepCopy process
-        return copy -- return as State C
+        return copy -- return as State A
     end)
     :SetReconcileTableCallback(function(
         target: (StateA | StateC), -- the table to mutate (make changes to) into StateA
