@@ -36,7 +36,7 @@ This fork makes it easy to implement your own modifications to the data flow.
 > >
 > > > “The data (key value) is also stored as a string, regardless of its initial type. You can check the size of the data with the `JSONEncode()` function, which converts Luau data into a serialized JSON table.”
 > 
-> So as a type it would be defined like this: (**[ProfileStore.luau line 997](<ProfileStore.luau/#L997>)**)
+> So as a type it would be defined like this: (**[ProfileStore.luau line 1037](<ProfileStore.luau/#L1037>)**)
 > 
 > ```lua
 > type JSONAcceptable = { JSONAcceptable } | { [string]: JSONAcceptable } | number | string | boolean | buffer
@@ -97,7 +97,7 @@ With this setup, it is possible to store and manipulate Roblox Datatypes at Runt
 
 ### Every ProfileStore Object now has Custom Callbacks for easy Data flow customization
 - By default there are no modifications, ProfileStore works just the same as in it's original version. All of the custom callbacks are nil, therefore not used and do not apply any changes to the usual data flow.
-    **[defined in lines 1392-1398 in ProfileStore.luau](<ProfileStore.luau/#L1392-1398>):**
+    **[defined in lines 1433-1439 in ProfileStore.luau](<ProfileStore.luau/#L1433-1439>):**
 
     ```lua
     custom_callbacks = {
@@ -123,18 +123,25 @@ With this setup, it is possible to store and manipulate Roblox Datatypes at Runt
 
     This one is only ever used when calling **Profile:Reconcile** on Profile objects created via this ProfileStore Object.
 
-    The <strong>callback</strong> will be called at Profile:Reconcile() with ``( target: Profile.Data (Decoded; State A or State C), template: ProfileStore.Template | Profile.ProfileStore.Template (Can be any of the states A, B and C or also a hybrid - the handler is in your hands), profile: Profile<T> ["usually unnecessary/unused, so it was marked with ? to silence the type checker when you leave this unused"] ) -> nothing, but mutate the target to State A``
+    The <strong>callback</strong> will be called at Profile:Reconcile() with
+  ```lua
+  (
+    target: Profile.Data, --(Decoded; State A or State C)
+    template: ProfileStore.Template | Profile.ProfileStore.Template, --'(Can be any of the states A, B and C or also a hybrid - the handler is in your hands)
+    profile: Profile<T> --["usually unnecessary/unused, so it was marked with ? to silence the type checker when you leave this unused"]
+  ) -> nothing, but mutate the target to State A
+  ```
 - **:SetDecodeCallback(callback)**
     Sets the custom Decode callback; Returns self.
 
     The <strong>callback</strong> will be called at the start of transform_function with Profile.Data (from the Datastore), if there was any saved;
-    It will also be called at the start of Profile.New() to write LastSavedData. The `Profile.Data` (`_Data`) is directly what your Decode callback outputs or fresh data from datastore, if no custom Decode callback is set.
+    It will also be called at the start of Profile.New() - the `Profile.Data` (`_Data`) is directly what your Decode callback outputs or fresh data from datastore, if no custom Decode callback is set.
 
     Decode(State B) -> State A
 - **:SetEncodeCallback(callback)** 
     Sets the custom Encode callback; Returns self.
 
-    The <strong>callback</strong> will be called at the end of transform_function with Profile.Data (after it has been Decoded by the custom Decode callback set using SetDecodeCallback method), before it's returned back into DataStore
+    The <strong>callback</strong> will be called at the end of transform_function with Profile.Data, before it's returned back into DataStore
     
     Encode(State C) -> State B
 - **:SetRuntimeWrapperCallback(callback)**
@@ -146,11 +153,12 @@ With this setup, it is possible to store and manipulate Roblox Datatypes at Runt
 
     However more complex systems might need this.
 
+    ```lua
     RuntimeWrapper(
-        table that Can be any of the states A, B and C or also a hybrid - the handler is in your hands,
-        
-        Profile to which the return value will be written
+      input, -- (any table written to Profile.Data) -- table that Can be any of the states A, B and C or also a hybrid - the handler is in your hands
+      profile, -- Profile to which the return value will be written
     ) -> State A
+    ```
 
 ## IMPORTANT Note about Encoding/Decoding
 
@@ -162,7 +170,7 @@ With this setup, it is possible to store and manipulate Roblox Datatypes at Runt
 -- the types StateA, StateB and StateC are not defined anywhere
 -- they are here solely for the looks of the example
 
-local Store = ProfileStore.New("StoreName", {--[[data template]]})
+local Store = ProfileStoreV2Module.New("StoreName", {--[[data template]]})
     :SetDeepCopyTableCallback(function(t: (StateA | StateC)): StateA
         local copy : StateA = {}
         -- do your DeepCopy process
@@ -189,7 +197,10 @@ local Store = ProfileStore.New("StoreName", {--[[data template]]})
         -- do your Encoding process
         return result -- return as State B
     end)
-    :SetRuntimeWrapperCallback(function(data: (StateA | StateB | StateC | any)): StateA
+    :SetRuntimeWrapperCallback(function(
+      data: (StateA | StateB | StateC | any), -- whatever was input (is being written) to Profile.Data has it's type == "table"
+      profile: ProfileStoreV2Module.Profile<{--[[data template]]}> -- profile to which it is being written
+    ): StateA
         local result = {}
         -- implement your own rules on what happens whenever Profile.Data is overwritten as a whole
         return result -- return as State A
